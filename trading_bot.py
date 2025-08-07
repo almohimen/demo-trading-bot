@@ -24,7 +24,8 @@ API_SECRET = os.getenv("API_SECRET")
 MONITOR_SYMBOLS_RAW = os.getenv("MONITOR_SYMBOLS", "") 
 
 # Trading parameters from environment variables
-TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "40")) # Percentage of quote currency to use
+# INCREASED: Now defaults to using 80% of quote currency for each trade.
+TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "80")) # Percentage of quote currency to use
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", "70"))
 RSI_OVERSOLD = int(os.getenv("RSI_OVERSOLD", "30"))
@@ -34,15 +35,18 @@ MACD_SIGNAL = int(os.getenv("MACD_SIGNAL", "9"))
 BB_PERIOD = int(os.getenv("BB_PERIOD", "20"))
 BB_STD_DEV = int(os.getenv("BB_STD_DEV", "2"))
 KLINE_INTERVAL = os.getenv("KLINE_INTERVAL", "1m")
-TICK_INTERVAL_SECONDS = int(os.getenv("TICK_INTERVAL_SECONDS", "60"))
+# DECREASED: The bot will now check for trades every 30 seconds.
+TICK_INTERVAL_SECONDS = int(os.getenv("TICK_INTERVAL_SECONDS", "30"))
 
 # === NEW: Custom trading parameters for more proactive trading and risk management ===
-# A more flexible RSI buy threshold (instead of the strict RSI_OVERSOLD)
-RSI_BUY_THRESHOLD = int(os.getenv("RSI_BUY_THRESHOLD", "40"))
+# MODIFIED: A more flexible RSI buy threshold (instead of the strict RSI_OVERSOLD) to trade more frequently.
+RSI_BUY_THRESHOLD = int(os.getenv("RSI_BUY_THRESHOLD", "50"))
 
-# Stop-loss and take-profit percentages (expressed as 5.0 for 5%)
-STOP_LOSS_PERCENT = float(os.getenv("STOP_LOSS_PERCENT", "2.0"))
-TAKE_PROFIT_PERCENT = float(os.getenv("TAKE_PROFIT_PERCENT", "5.0"))
+# MODIFIED: Stop-loss and take-profit percentages (expressed as 5.0 for 5%)
+# Take-profit is tighter to secure smaller gains faster.
+TAKE_PROFIT_PERCENT = float(os.getenv("TAKE_PROFIT_PERCENT", "2.0"))
+# Stop-loss is tighter to cut losses more quickly.
+STOP_LOSS_PERCENT = float(os.getenv("STOP_LOSS_PERCENT", "1.0"))
 
 
 # ======================================================================================================================
