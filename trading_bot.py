@@ -125,3 +125,4 @@ if __name__ == "__main__":
         logging.info("Bot stopped manually.")
     except Exception as e:
         logging.error(f"Fatal error: {e}")
+
