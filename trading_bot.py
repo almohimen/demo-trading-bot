@@ -4,7 +4,7 @@ import time
 import logging
 import threading
 from decimal import Decimal, ROUND_DOWN
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from binance.client import Client
@@ -102,10 +102,11 @@ def find_emerging_symbols(time_limit_hours=24):
     emerging_symbols = []
     try:
         exchange_info = client.get_exchange_info()
-        now = datetime.utcnow()
+        # Fix the DeprecationWarning by using a timezone-aware object
+        now = datetime.now(timezone.utc)
         for symbol_info in exchange_info['symbols']:
             # The listTime is in milliseconds, so convert to seconds
-            list_time = datetime.utcfromtimestamp(symbol_info['listTime'] / 1000)
+            list_time = datetime.fromtimestamp(symbol_info['listTime'] / 1000, tz=timezone.utc)
             # Check if the symbol is a USDT pair and was listed within the time limit
             if symbol_info['symbol'].endswith('USDT') and (now - list_time) < timedelta(hours=time_limit_hours):
                 emerging_symbols.append(symbol_info['symbol'])
