@@ -2,20 +2,20 @@ import os
 import time
 import logging
 from threading import Thread
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify
 from binance.client import Client
 from binance.enums import *
 from binance.exceptions import BinanceAPIException
 
-# === Logging ===
+# === Logging setup ===
 logging.basicConfig(
     filename='trading_bot.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# === Load Binance API keys ===
+# === Binance API keys ===
 API_KEY = os.getenv('BINANCE_API_KEY')
 API_SECRET = os.getenv('BINANCE_API_SECRET')
 
@@ -33,6 +33,10 @@ status = {
     "last_trade_time": {}
 }
 
+@app.route("/")
+def home():
+    return "Trading bot is live!"
+
 @app.route("/status")
 def get_status():
     return jsonify(status)
@@ -40,12 +44,12 @@ def get_status():
 # === Bot config ===
 TRADE_AMOUNT_USDT = 15
 MIN_VOLUME = 1_000_000
-COOLDOWN = 60
+COOLDOWN = 60  # seconds cooldown between trades per symbol
 
 def get_top_symbols(limit=10):
     tickers = client.get_ticker_24hr()
     sorted_tickers = sorted(
-        [t for t in tickers if t['symbol'].endswith('USDT') and not t['symbol'].endswith('BUSDUSDT') and float(t['quoteVolume']) > MIN_VOLUME],
+        [t for t in tickers if t['symbol'].endswith('USDT') and float(t['quoteVolume']) > MIN_VOLUME],
         key=lambda x: float(x['quoteVolume']),
         reverse=True
     )
@@ -65,9 +69,11 @@ def can_trade(symbol):
 def place_order(symbol, side, usdt):
     price = get_price(symbol)
     qty = round(usdt / price, 5)
-    if not has_usdt(usdt):
+    if side == SIDE_BUY and not has_usdt(usdt):
         logging.warning(f"Insufficient USDT for {symbol}")
         return
+    # Here you can add asset balance check for selling if needed
+    
     try:
         order = client.create_order(
             symbol=symbol,
@@ -105,13 +111,15 @@ def simple_strategy():
             except Exception as e:
                 logging.error(f"Error with {symbol}: {e}")
 
-# === Entry Point ===
 if __name__ == "__main__":
+    # Run Flask app in a background thread
     def run_flask():
-        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port, threaded=True)
 
     Thread(target=run_flask, daemon=True).start()
 
+    # Run trading bot in main thread
     try:
         simple_strategy()
     except KeyboardInterrupt:
