@@ -4,6 +4,7 @@ import time
 import logging
 import threading
 from decimal import Decimal, ROUND_DOWN
+from datetime import datetime, timedelta
 
 import pandas as pd
 from binance.client import Client
@@ -92,9 +93,33 @@ def get_top_symbols(limit=20):
     except Exception as e:
         logging.error(f"Failed to fetch top symbols: {e}")
         return []
+        
+def find_emerging_symbols(time_limit_hours=24):
+    """
+    Finds newly listed coins by checking the 'listTime' property.
+    This helps the bot detect new trading opportunities.
+    """
+    emerging_symbols = []
+    try:
+        exchange_info = client.get_exchange_info()
+        now = datetime.utcnow()
+        for symbol_info in exchange_info['symbols']:
+            # The listTime is in milliseconds, so convert to seconds
+            list_time = datetime.utcfromtimestamp(symbol_info['listTime'] / 1000)
+            # Check if the symbol is a USDT pair and was listed within the time limit
+            if symbol_info['symbol'].endswith('USDT') and (now - list_time) < timedelta(hours=time_limit_hours):
+                emerging_symbols.append(symbol_info['symbol'])
+        
+        if emerging_symbols:
+            logging.info(f"Found {len(emerging_symbols)} emerging symbols listed in the last {time_limit_hours} hours: {emerging_symbols}")
+        
+        return emerging_symbols
+    except Exception as e:
+        logging.error(f"Failed to find emerging symbols: {e}")
+        return []
 
 # The bot will now prioritize the dynamically fetched symbols.
-MONITOR_SYMBOLS = get_top_symbols()
+MONITOR_SYMBOLS = list(set(get_top_symbols() + find_emerging_symbols()))
 
 # If the dynamic fetch fails, fall back to the environment variable list, if provided.
 if not MONITOR_SYMBOLS and MONITOR_SYMBOLS_RAW:
