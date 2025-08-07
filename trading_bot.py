@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_DOWN
 import pandas as pd
 from binance.client import Client
 from binance.enums import *
-from binance.exceptions import BinanceAPIException
+from binance.exceptions import BinanceAPIException, BinanceRequestException, BinanceAPIException
 from flask import Flask
 
 # ======================================================================================================================
@@ -35,7 +35,7 @@ TICK_INTERVAL_SECONDS = int(os.getenv("TICK_INTERVAL_SECONDS", "60"))
 
 # ======================================================================================================================
 # SETUP
-# =================================================S=====================================================================
+# ======================================================================================================================
 
 # Setup logging
 logging.basicConfig(
@@ -92,7 +92,7 @@ try:
     logging.info(f"Minimum Notional Value: {MIN_NOTIONAL_VALUE}")
 
 except BinanceAPIException as e:
-    # This will now print the actual error code and message from Binance
+    # This now prints the actual error code and message from Binance
     logging.error(f"Binance API Error during get_symbol_info for {SYMBOL}: Code: {e.code}, Message: {e.message}")
     sys.exit(1)
 except ValueError as e:
@@ -100,7 +100,8 @@ except ValueError as e:
     logging.error(f"Configuration Error: {e}")
     sys.exit(1)
 except Exception as e:
-    logging.error(f"An unexpected error occurred while getting symbol info for {SYMBOL}: {e}")
+    # This will catch any other unexpected errors and print the full traceback
+    logging.exception(f"An unexpected error occurred while getting symbol info for {SYMBOL}: {e}")
     sys.exit(1)
 
 # ======================================================================================================================
