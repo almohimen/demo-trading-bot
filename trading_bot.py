@@ -89,15 +89,16 @@ except Exception as e:
 
 def get_top_symbols(limit=20):
     """
-    Fetches the top symbols by trading volume and filters for USDT pairs.
+    Fetches the top symbols by trading volume and filters for USDT and FDUSD pairs.
     """
     try:
         # Get all 24hr tickers
         tickers = client.get_ticker()
         
-        # Filter for USDT pairs and sort by quote volume (in descending order)
-        usdt_pairs = [t for t in tickers if t['symbol'].endswith('USDT')]
-        sorted_pairs = sorted(usdt_pairs, key=lambda x: float(x['quoteVolume']), reverse=True)
+        # Filter for USDT and FDUSD pairs and sort by quote volume (in descending order)
+        # MODIFIED: Now checks for both 'USDT' and 'FDUSD'
+        usdt_fdusd_pairs = [t for t in tickers if t['symbol'].endswith('USDT') or t['symbol'].endswith('FDUSD')]
+        sorted_pairs = sorted(usdt_fdusd_pairs, key=lambda x: float(x['quoteVolume']), reverse=True)
         
         # Return the top `limit` symbols
         top_symbols = [pair['symbol'] for pair in sorted_pairs[:limit]]
@@ -120,8 +121,9 @@ def find_emerging_symbols(time_limit_hours=24):
         for symbol_info in exchange_info['symbols']:
             # The listTime is in milliseconds, so convert to seconds
             list_time = datetime.fromtimestamp(symbol_info['listTime'] / 1000, tz=timezone.utc)
-            # Check if the symbol is a USDT pair and was listed within the time limit
-            if symbol_info['symbol'].endswith('USDT') and (now - list_time) < timedelta(hours=time_limit_hours):
+            # Check if the symbol is a USDT or FDUSD pair and was listed within the time limit
+            # MODIFIED: Now checks for both 'USDT' and 'FDUSD'
+            if (symbol_info['symbol'].endswith('USDT') or symbol_info['symbol'].endswith('FDUSD')) and (now - list_time) < timedelta(hours=time_limit_hours):
                 emerging_symbols.append(symbol_info['symbol'])
         
         if emerging_symbols:
@@ -306,6 +308,7 @@ def trade(symbol):
     # Get symbol-specific trading info from the cache
     info = symbol_info_cache[symbol]
     base_asset = info['BASE_ASSET']
+    # MODIFIED: Get quote asset from the cached symbol info.
     quote_asset = info['QUOTE_ASSET']
     min_notional_value = info['MIN_NOTIONAL_VALUE']
 
@@ -313,6 +316,7 @@ def trade(symbol):
 
     # --- BUY LOGIC ---
     if not in_position[symbol]['status'] and should_buy(df):
+        # MODIFIED: Now checks for the specific quote asset balance.
         quote_balance = get_balance(quote_asset)
         trade_amount_quote = (quote_balance * TRADE_QUANTITY_PERCENT) / 100
         
