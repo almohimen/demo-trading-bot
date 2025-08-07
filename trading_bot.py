@@ -24,7 +24,6 @@ API_SECRET = os.getenv("API_SECRET")
 MONITOR_SYMBOLS_RAW = os.getenv("MONITOR_SYMBOLS", "") 
 
 # Trading parameters from environment variables
-# Updated default to 40% as requested.
 TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "40")) # Percentage of quote currency to use
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", "70"))
@@ -36,6 +35,15 @@ BB_PERIOD = int(os.getenv("BB_PERIOD", "20"))
 BB_STD_DEV = int(os.getenv("BB_STD_DEV", "2"))
 KLINE_INTERVAL = os.getenv("KLINE_INTERVAL", "1m")
 TICK_INTERVAL_SECONDS = int(os.getenv("TICK_INTERVAL_SECONDS", "60"))
+
+# === NEW: Custom trading parameters for more proactive trading and risk management ===
+# A more flexible RSI buy threshold (instead of the strict RSI_OVERSOLD)
+RSI_BUY_THRESHOLD = int(os.getenv("RSI_BUY_THRESHOLD", "40"))
+
+# Stop-loss and take-profit percentages (expressed as 5.0 for 5%)
+STOP_LOSS_PERCENT = float(os.getenv("STOP_LOSS_PERCENT", "2.0"))
+TAKE_PROFIT_PERCENT = float(os.getenv("TAKE_PROFIT_PERCENT", "5.0"))
+
 
 # ======================================================================================================================
 # SETUP
@@ -51,6 +59,7 @@ logging.basicConfig(
 # --- State Management ---
 # in_position is now a dictionary to track position for multiple symbols.
 # symbol_info_cache stores filter info to avoid repeated API calls.
+# in_position now also stores the buy price for stop-loss/take-profit calculations
 in_position = {}
 symbol_info_cache = {}
 
@@ -149,7 +158,8 @@ for symbol in MONITOR_SYMBOLS:
             'step_size': Decimal(lot_size_filter['stepSize']) if lot_size_filter else Decimal("0.00001"),
             'MIN_NOTIONAL_VALUE': Decimal(min_notional_filter['minNotional']) if min_notional_filter else Decimal("10")
         }
-        in_position[symbol] = False
+        # Initialize position to False, and also the buy_price to 0.
+        in_position[symbol] = {'status': False, 'buy_price': 0}
         valid_symbols.append(symbol)
         
         logging.info(f"Successfully initialized symbol: {symbol}")
@@ -239,20 +249,38 @@ def calculate_indicators(df):
 # ======================================================================================================================
 
 def should_buy(df):
+    """
+    NEW LOGIC: Relaxed buy condition. 
+    A buy signal is now generated with a less extreme RSI and a positive MACD crossover.
+    The Bollinger Band condition is removed to allow for more entry points.
+    """
     latest = df.iloc[-1]
     return (
-        latest["rsi"] < RSI_OVERSOLD and
-        latest["macd"] > latest["signal"] and
-        latest["c"] < latest["bb_lower"]
+        latest["rsi"] < RSI_BUY_THRESHOLD and
+        latest["macd"] > latest["signal"]
     )
 
-def should_sell(df):
+def should_sell_technical(df):
+    """Original sell condition based on technical indicators."""
     latest = df.iloc[-1]
     return (
         latest["rsi"] > RSI_OVERBOUGHT and
         latest["macd"] < latest["signal"] and
         latest["c"] > latest["bb_upper"]
     )
+
+# New sell conditions based on risk management
+def should_sell_stop_loss(current_price, buy_price):
+    """Checks for a stop-loss signal."""
+    # Calculates the percentage drop from the buy price
+    price_drop_percent = ((buy_price - current_price) / buy_price) * 100
+    return price_drop_percent >= STOP_LOSS_PERCENT
+
+def should_sell_take_profit(current_price, buy_price):
+    """Checks for a take-profit signal."""
+    # Calculates the percentage gain from the buy price
+    price_gain_percent = ((current_price - buy_price) / buy_price) * 100
+    return price_gain_percent >= TAKE_PROFIT_PERCENT
 
 def format_quantity(quantity, symbol):
     """Formats the quantity according to the symbol's stepSize."""
@@ -277,10 +305,10 @@ def trade(symbol):
     quote_asset = info['QUOTE_ASSET']
     min_notional_value = info['MIN_NOTIONAL_VALUE']
 
-    logging.info(f"Checking {symbol}... Price: {latest_price:.4f}, RSI: {df.iloc[-1]['rsi']:.2f}, In Position: {in_position.get(symbol, False)}")
+    logging.info(f"Checking {symbol}... Price: {latest_price:.4f}, RSI: {df.iloc[-1]['rsi']:.2f}, In Position: {in_position[symbol]['status']}")
 
     # --- BUY LOGIC ---
-    if not in_position.get(symbol, False) and should_buy(df):
+    if not in_position[symbol]['status'] and should_buy(df):
         quote_balance = get_balance(quote_asset)
         trade_amount_quote = (quote_balance * TRADE_QUANTITY_PERCENT) / 100
         
@@ -293,32 +321,51 @@ def trade(symbol):
         
         try:
             order = client.order_market_buy(symbol=symbol, quantity=quantity_to_buy)
-            logging.info(f"✅ SUCCESS: Bought {order['executedQty']} {base_asset} for {symbol} at ~{latest_price}")
-            in_position[symbol] = True
+            # Record the buy price in the in_position state for stop-loss/take-profit
+            in_position[symbol]['status'] = True
+            in_position[symbol]['buy_price'] = latest_price
+            logging.info(f"✅ SUCCESS: Bought {order['executedQty']} {base_asset} for {symbol} at ~{latest_price}. Recording buy price for risk management.")
         except BinanceAPIException as e:
             logging.error(f"BUY API ERROR for {symbol}: {e}")
         except Exception as e:
             logging.error(f"BUY FAILED for {symbol}: An unexpected error occurred: {e}")
 
     # --- SELL LOGIC ---
-    elif in_position.get(symbol, False) and should_sell(df):
-        base_balance = get_balance(base_asset)
-        quantity_to_sell = format_quantity(base_balance, symbol)
-
-        if quantity_to_sell * latest_price < float(min_notional_value):
-            logging.warning(f"SELL signal detected for {symbol}, but sell amount is below minimum notional. Balance: {base_balance} {base_asset}. Skipping sell.")
-            return
-
-        logging.info(f"SELL SIGNAL for {symbol}! Attempting to sell {quantity_to_sell} {base_asset}...")
+    elif in_position[symbol]['status']:
+        buy_price = in_position[symbol]['buy_price']
         
-        try:
-            order = client.order_market_sell(symbol=symbol, quantity=quantity_to_sell)
-            logging.info(f"🚨 SUCCESS: Sold {order['executedQty']} {base_asset} for {symbol} at ~{latest_price}")
-            in_position[symbol] = False
-        except BinanceAPIException as e:
-            logging.error(f"SELL API ERROR for {symbol}: {e}")
-        except Exception as e:
-            logging.error(f"SELL FAILED for {symbol}: An unexpected error occurred: {e}")
+        # Check all three sell conditions: stop-loss, take-profit, or technical indicator
+        sell_signal = (
+            should_sell_stop_loss(latest_price, buy_price) or
+            should_sell_take_profit(latest_price, buy_price) or
+            should_sell_technical(df)
+        )
+        
+        if sell_signal:
+            reason = "Stop-Loss Triggered" if should_sell_stop_loss(latest_price, buy_price) else \
+                     "Take-Profit Triggered" if should_sell_take_profit(latest_price, buy_price) else \
+                     "Technical Signal"
+            
+            base_balance = get_balance(base_asset)
+            quantity_to_sell = format_quantity(base_balance, symbol)
+
+            if quantity_to_sell * latest_price < float(min_notional_value):
+                logging.warning(f"SELL signal ({reason}) detected for {symbol}, but sell amount is below minimum notional. Skipping sell.")
+                # We stay in position but log the issue
+                return
+
+            logging.info(f"SELL SIGNAL for {symbol} ({reason})! Attempting to sell {quantity_to_sell} {base_asset}...")
+            
+            try:
+                order = client.order_market_sell(symbol=symbol, quantity=quantity_to_sell)
+                logging.info(f"🚨 SUCCESS: Sold {order['executedQty']} {base_asset} for {symbol} at ~{latest_price}")
+                # Reset position after selling
+                in_position[symbol]['status'] = False
+                in_position[symbol]['buy_price'] = 0
+            except BinanceAPIException as e:
+                logging.error(f"SELL API ERROR for {symbol}: {e}")
+            except Exception as e:
+                logging.error(f"SELL FAILED for {symbol}: An unexpected error occurred: {e}")
 
 # ======================================================================================================================
 # MAIN EXECUTION
