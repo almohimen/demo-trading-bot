@@ -24,8 +24,8 @@ API_SECRET = os.getenv("API_SECRET")
 MONITOR_SYMBOLS_RAW = os.getenv("MONITOR_SYMBOLS", "") 
 
 # Trading parameters from environment variables
-# INCREASED: Now defaults to using 80% of quote currency for each trade.
-TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "80")) # Percentage of quote currency to use
+# MODIFIED: Now defaults to using 100% of quote currency for each trade.
+TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "100")) # Percentage of quote currency to use
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", "70"))
 RSI_OVERSOLD = int(os.getenv("RSI_OVERSOLD", "30"))
