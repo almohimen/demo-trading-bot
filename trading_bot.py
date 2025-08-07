@@ -204,10 +204,16 @@ def show_wallet_balance():
         logging.error(f"Error fetching wallet balance: {e}")
 
 def get_balance(asset):
-    """Gets the available balance for a specific asset."""
+    """
+    MODIFIED: Now gets the available balance for a specific asset by checking the full account balance,
+    which is more reliable than the individual asset balance endpoint.
+    """
     try:
-        balance = client.get_asset_balance(asset=asset)
-        return float(balance['free'])
+        account_info = client.get_account()
+        for balance in account_info['balances']:
+            if balance['asset'] == asset:
+                return float(balance['free'])
+        return 0.0 # Return 0 if the asset is not found
     except Exception as e:
         logging.error(f"Error getting balance for {asset}: {e}")
         return 0.0
