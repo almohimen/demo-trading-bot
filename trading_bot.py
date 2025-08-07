@@ -174,7 +174,10 @@ class TradingBot:
             logging.error(f"Error fetching wallet balance: {e}")
 
     def get_balance(self, asset):
-        """Gets the available balance for a specific asset using a reliable method."""
+        """
+        FIXED: Gets the available balance for a specific asset by checking the full account balance,
+        which is more reliable than the individual asset balance endpoint.
+        """
         try:
             account_info = self.client.get_account()
             for balance in account_info['balances']:
