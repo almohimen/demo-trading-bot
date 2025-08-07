@@ -8,132 +8,113 @@ from binance.client import Client
 from binance.enums import *
 from binance.exceptions import BinanceAPIException
 
-# === Setup Logging ===
+# === Logging ===
 logging.basicConfig(
     filename='trading_bot.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# === Load API credentials from environment ===
+# === Load Binance API keys ===
 API_KEY = os.getenv('BINANCE_API_KEY')
 API_SECRET = os.getenv('BINANCE_API_SECRET')
 
 if not API_KEY or not API_SECRET:
-    raise Exception("Please set BINANCE_API_KEY and BINANCE_API_SECRET environment variables.")
+    raise Exception("Missing Binance API credentials.")
 
 client = Client(API_KEY, API_SECRET)
 
-# === Flask for Monitoring ===
+# === Flask setup ===
 app = Flask(__name__)
 status = {
     "running": True,
     "last_prices": {},
     "last_action": {},
-    "last_trade_time": {},
+    "last_trade_time": {}
 }
 
 @app.route("/status")
 def get_status():
     return jsonify(status)
 
-def run_flask():
-    app.run(port=5000)
-
-# === Configurable Constants ===
+# === Bot config ===
 TRADE_AMOUNT_USDT = 15
-MIN_VOLUME = 1_000_000  # Minimum 24h quote volume
-TRADE_COOLDOWN_SECONDS = 60
+MIN_VOLUME = 1_000_000
+COOLDOWN = 60
 
-# === Helper Functions ===
 def get_top_symbols(limit=10):
     tickers = client.get_ticker_24hr()
     sorted_tickers = sorted(
-        [t for t in tickers if t['symbol'].endswith('USDT') and
-         not t['symbol'].endswith('BUSDUSDT') and
-         float(t['quoteVolume']) > MIN_VOLUME],
+        [t for t in tickers if t['symbol'].endswith('USDT') and not t['symbol'].endswith('BUSDUSDT') and float(t['quoteVolume']) > MIN_VOLUME],
         key=lambda x: float(x['quoteVolume']),
         reverse=True
     )
     return [t['symbol'] for t in sorted_tickers[:limit]]
 
 def get_price(symbol):
-    ticker = client.get_symbol_ticker(symbol=symbol)
-    return float(ticker['price'])
+    return float(client.get_symbol_ticker(symbol=symbol)['price'])
 
-def has_sufficient_balance(usdt_amount):
+def has_usdt(amount):
     balance = float(client.get_asset_balance(asset='USDT')['free'])
-    return balance >= usdt_amount
+    return balance >= amount
 
 def can_trade(symbol):
     last_trade = status["last_trade_time"].get(symbol)
-    if not last_trade:
-        return True
-    return datetime.now() - last_trade > timedelta(seconds=TRADE_COOLDOWN_SECONDS)
+    return not last_trade or (datetime.now() - last_trade).total_seconds() > COOLDOWN
 
-def place_order(symbol, side, usdt_amount):
+def place_order(symbol, side, usdt):
     price = get_price(symbol)
-    quantity = round(usdt_amount / price, 5)
-    if not has_sufficient_balance(usdt_amount):
-        logging.warning(f"Not enough USDT to trade {symbol}. Needed: {usdt_amount}")
-        return None
+    qty = round(usdt / price, 5)
+    if not has_usdt(usdt):
+        logging.warning(f"Insufficient USDT for {symbol}")
+        return
     try:
         order = client.create_order(
             symbol=symbol,
             side=side,
             type=ORDER_TYPE_MARKET,
-            quantity=quantity
+            quantity=qty
         )
         logging.info(f"{side} order placed for {symbol}: {order}")
         status["last_action"][symbol] = f"{side} @ {price}"
         status["last_trade_time"][symbol] = datetime.now()
-        return order
     except BinanceAPIException as e:
-        logging.error(f"Error placing order for {symbol}: {e}")
-        return None
+        logging.error(f"Order failed for {symbol}: {e}")
 
-# === Trading Logic ===
 def simple_strategy():
+    logging.info(">>> simple_strategy() started <<<")
     symbols = get_top_symbols()
-    last_prices = {symbol: get_price(symbol) for symbol in symbols}
+    last_prices = {s: get_price(s) for s in symbols}
     status["last_prices"] = last_prices.copy()
 
-    logging.info("Started trading loop with symbols: " + ", ".join(symbols))
-    
     while True:
         time.sleep(10)
         for symbol in symbols:
             try:
-                current_price = get_price(symbol)
-                last_price = last_prices[symbol]
-                change = (current_price - last_price) / last_price
+                price = get_price(symbol)
+                change = (price - last_prices[symbol]) / last_prices[symbol]
 
-                logging.info(f"{symbol}: price={current_price:.4f}, change={change:.2%}")
-                
                 if change <= -0.01 and can_trade(symbol):
-                    logging.info(f"{symbol}: Buy signal")
                     place_order(symbol, SIDE_BUY, TRADE_AMOUNT_USDT)
-                    last_prices[symbol] = current_price
-                    status["last_prices"][symbol] = current_price
-
+                    last_prices[symbol] = price
+                    status["last_prices"][symbol] = price
                 elif change >= 0.01 and can_trade(symbol):
-                    logging.info(f"{symbol}: Sell signal")
                     place_order(symbol, SIDE_SELL, TRADE_AMOUNT_USDT)
-                    last_prices[symbol] = current_price
-                    status["last_prices"][symbol] = current_price
-
+                    last_prices[symbol] = price
+                    status["last_prices"][symbol] = price
             except Exception as e:
-                logging.error(f"Error processing {symbol}: {e}")
+                logging.error(f"Error with {symbol}: {e}")
 
-# === Run Flask + Bot in Threads ===
+# === Entry Point ===
 if __name__ == "__main__":
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+    def run_flask():
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    Thread(target=run_flask, daemon=True).start()
 
     try:
         simple_strategy()
     except KeyboardInterrupt:
-        logging.info("Bot stopped by user.")
+        logging.info("Bot stopped manually.")
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logging.error(f"Fatal error: {e}")
