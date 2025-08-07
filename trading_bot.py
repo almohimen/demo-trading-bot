@@ -72,8 +72,7 @@ def place_order(symbol, side, usdt):
     if side == SIDE_BUY and not has_usdt(usdt):
         logging.warning(f"Insufficient USDT for {symbol}")
         return
-    # Here you can add asset balance check for selling if needed
-    
+
     try:
         order = client.create_order(
             symbol=symbol,
