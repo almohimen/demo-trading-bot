@@ -18,11 +18,13 @@ from flask import Flask
 # Load from environment variables
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-# A comma-separated list of symbols to monitor, e.g., "BTCUSDT,ETHUSDT"
-MONITOR_SYMBOLS_RAW = os.getenv("MONITOR_SYMBOLS", "BTCUSDT")
+
+# A comma-separated list of symbols to monitor. Now a fallback, as we will dynamically fetch top coins.
+MONITOR_SYMBOLS_RAW = os.getenv("MONITOR_SYMBOLS", "") 
 
 # Trading parameters from environment variables
-TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "10")) # Percentage of quote currency to use
+# Updated default to 40% as requested.
+TRADE_QUANTITY_PERCENT = float(os.getenv("TRADE_QUANTITY_PERCENT", "40")) # Percentage of quote currency to use
 RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", "70"))
 RSI_OVERSOLD = int(os.getenv("RSI_OVERSOLD", "30"))
@@ -69,13 +71,40 @@ except Exception as e:
     logging.error(f"Failed to connect to Binance API: {e}")
     sys.exit(1) # Exit if we can't connect
 
-# --- Initialize Symbols and Caches ---
-MONITOR_SYMBOLS = [s.strip().upper() for s in MONITOR_SYMBOLS_RAW.split(',') if s.strip()]
+# --- Symbol Initialization ---
+
+def get_top_symbols(limit=20):
+    """
+    Fetches the top symbols by trading volume and filters for USDT pairs.
+    """
+    try:
+        # Get all 24hr tickers
+        tickers = client.get_ticker()
+        
+        # Filter for USDT pairs and sort by quote volume (in descending order)
+        usdt_pairs = [t for t in tickers if t['symbol'].endswith('USDT')]
+        sorted_pairs = sorted(usdt_pairs, key=lambda x: float(x['quoteVolume']), reverse=True)
+        
+        # Return the top `limit` symbols
+        top_symbols = [pair['symbol'] for pair in sorted_pairs[:limit]]
+        logging.info(f"Dynamically fetched top {limit} symbols by trading volume.")
+        return top_symbols
+    except Exception as e:
+        logging.error(f"Failed to fetch top symbols: {e}")
+        return []
+
+# The bot will now prioritize the dynamically fetched symbols.
+MONITOR_SYMBOLS = get_top_symbols()
+
+# If the dynamic fetch fails, fall back to the environment variable list, if provided.
+if not MONITOR_SYMBOLS and MONITOR_SYMBOLS_RAW:
+    MONITOR_SYMBOLS = [s.strip().upper() for s in MONITOR_SYMBOLS_RAW.split(',') if s.strip()]
 
 if not MONITOR_SYMBOLS:
-    logging.error("No symbols specified in MONITOR_SYMBOLS environment variable. Exiting.")
+    logging.error("No symbols could be fetched dynamically and no symbols specified in MONITOR_SYMBOLS. Exiting.")
     sys.exit(1)
 
+# Initialize caches and filters for the selected symbols
 valid_symbols = []
 for symbol in MONITOR_SYMBOLS:
     try:
