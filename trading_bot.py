@@ -71,6 +71,9 @@ except Exception as e:
 # Fetching these dynamically makes the bot adaptable to any symbol.
 try:
     symbol_info = client.get_symbol_info(SYMBOL)
+    if not symbol_info:
+        raise ValueError(f"Symbol '{SYMBOL}' not found on Binance.")
+
     BASE_ASSET = symbol_info['baseAsset']
     QUOTE_ASSET = symbol_info['quoteAsset']
     
@@ -88,8 +91,16 @@ try:
     logging.info(f"Quantity Precision (stepSize): {step_size} ({quantity_precision} decimal places)")
     logging.info(f"Minimum Notional Value: {MIN_NOTIONAL_VALUE}")
 
+except BinanceAPIException as e:
+    # This will now print the actual error code and message from Binance
+    logging.error(f"Binance API Error during get_symbol_info for {SYMBOL}: Code: {e.code}, Message: {e.message}")
+    sys.exit(1)
+except ValueError as e:
+    # This will catch our custom error if the symbol is not found
+    logging.error(f"Configuration Error: {e}")
+    sys.exit(1)
 except Exception as e:
-    logging.error(f"Could not get symbol info for {SYMBOL}. Error: {e}")
+    logging.error(f"An unexpected error occurred while getting symbol info for {SYMBOL}: {e}")
     sys.exit(1)
 
 # ======================================================================================================================
